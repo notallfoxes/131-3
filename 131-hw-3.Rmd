@@ -30,13 +30,13 @@ titanic$survived = factor(titanic$survived, levels = c('Yes','No'))
 titanic$pclass = factor(titanic$pclass)
 titanic$sex = factor(titanic$sex)
 
-# checking missing values
-sum(is.na(titanic_train))
-
 # split data, stratifying on survived
 titanic_split <- initial_split(titanic, prop = 0.80, strata = survived)
 titanic_train <- training(titanic_split)
 titanic_test <- testing(titanic_split)
+
+# checking missing values
+sum(is.na(titanic_train))
 ```
 
 Our training set has 712 observations:
@@ -167,9 +167,20 @@ pred_models = bind_cols(predict(log_fit, titanic_test),
                     predict(qda_fit, titanic_test),
                     predict(nb_fit, titanic_test))
 colnames(pred_models) = c("log_pred","lda_pred","qda_pred", "nb_fit")
-head(pred_models)
 
 # calculate accuracies
+log_reg_acc <- augment(log_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+lda_acc <- augment(lda_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+qda_acc <- augment(qda_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
+nb_acc <- augment(nb_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+
 accuracies <- c(log_reg_acc$.estimate, lda_acc$.estimate, 
                 nb_acc$.estimate, qda_acc$.estimate)
 models <- c("Logistic Regression", "LDA", "Naive Bayes", "QDA")
@@ -190,7 +201,7 @@ bind_cols(predict(log_fit, new_data = titanic_test), titanic_test %>% dplyr::sel
 bind_cols(predict(log_fit, new_data = titanic_test), titanic_test %>% dplyr::select(survived)) %>% accuracy(truth = survived, estimate = .pred_class)
 ```
 
-Confusion matrix:
+Confusion matrix heatmap:
 ```{r message = FALSE, warning = FALSE}
 predict(log_fit, titanic_test)
 
