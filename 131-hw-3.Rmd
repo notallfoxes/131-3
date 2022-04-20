@@ -1,0 +1,213 @@
+---
+title: "131-hw-3"
+author: "Tonia Wu"
+date: "4/14/2022"
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(yardstick)
+library(dplyr)
+library(corrr)
+library(klaR)
+library(discrim)
+library(poissonreg)
+library(pROC)
+titanic <- read.csv('C:\\Users\\me\\Downloads\\homework-3\\homework-3\\data\\titanic.csv')
+```
+
+# Q1
+We want to use stratified sampling since the number of people who did or did not survive is uneven.
+```{r}
+# set seed
+set.seed(266)
+
+# changing survived and pclass to factors
+titanic$survived = factor(titanic$survived, levels = c('Yes','No'))
+titanic$pclass = factor(titanic$pclass)
+titanic$sex = factor(titanic$sex)
+
+# checking missing values
+sum(is.na(titanic_train))
+
+# split data, stratifying on survived
+titanic_split <- initial_split(titanic, prop = 0.80, strata = survived)
+titanic_train <- training(titanic_split)
+titanic_test <- testing(titanic_split)
+```
+
+Our training set has 712 observations:
+```{r}
+dim(titanic_train)
+```
+
+Our test dataset has 179 observations:
+```{r}
+# get test dimensions
+dim(titanic_test)
+```
+
+# Q2
+Roughly 60% of passengers did not survivee.
+```{r}
+# plot of how many survived
+titanic_train %>% 
+  ggplot(aes(x = survived)) +
+  geom_bar(aes(y = ..prop.., group = 1))
+
+```
+
+# Q3
+
+At most, there are weak to low correlations both positive and negative between the variables. Passenger id was removed because, despite being numeric, it is not meaningfully quantitative.
+
+The strongest two correlations are 1) a low positive correlation between the number of siblings/spouses and the number of parents/children aboard and 2) a low negative correlation between number of siblings/spouses and age.
+```{r}
+# calculate corr matrix
+cor_plot <- titanic_train %>%
+  dplyr::select(-c(survived, pclass, name, sex, cabin, ticket, embarked, passenger_id)) %>%
+  correlate(use = "pairwise.complete.obs", method = "pearson")
+
+# visualize
+cor_plot %>%
+  stretch() %>%
+  ggplot(aes(x, y, fill = r)) +
+  geom_tile() +
+  geom_text(aes(label = as.character(fashion(r))))
+```
+
+
+# Q4
+
+```{r}
+# creating a recipe predicting survived using training data
+titanic_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + parch + fare, data = titanic_train) %>%
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(terms = ~ sex_male : fare) %>% 
+  step_interact(terms = ~ age : fare)
+
+titanic_recipe
+```
+
+# Q5
+
+```{r}
+# specify model type and engine
+log_reg <- logistic_reg() %>%
+  set_engine('glm') %>%
+  set_mode('classification')
+
+# set up workflow
+log_wkflow <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titanic_recipe)
+
+# fit model to training data
+log_fit <- fit(log_wkflow, titanic_train)
+```
+
+# Q6
+
+```{r}
+# specify lda
+lda_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+# set lda workflow
+lda_wkflow <- workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(titanic_recipe)
+
+# fit lda
+lda_fit <- fit(lda_wkflow, titanic_train)
+```
+
+
+# Q7
+
+```{r}
+qda_mod <- discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+qda_wkflow <- workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(titanic_recipe)
+
+qda_fit <- fit(qda_wkflow, titanic_train)
+```
+
+
+# Q8
+
+```{r}
+nb_mod <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+
+nb_wkflow <- workflow() %>% 
+  add_model(nb_mod) %>% 
+  add_recipe(titanic_recipe)
+
+nb_fit <- fit(nb_wkflow, titanic_train)
+```
+
+# Q9
+The logistic regression model performed the best on the training data.
+
+```{r message = FALSE, warning = FALSE}
+pred_models = bind_cols(predict(log_fit, titanic_test), 
+                    predict(lda_fit, titanic_test),
+                    predict(qda_fit, titanic_test),
+                    predict(nb_fit, titanic_test))
+colnames(pred_models) = c("log_pred","lda_pred","qda_pred", "nb_fit")
+head(pred_models)
+
+# calculate accuracies
+accuracies <- c(log_reg_acc$.estimate, lda_acc$.estimate, 
+                nb_acc$.estimate, qda_acc$.estimate)
+models <- c("Logistic Regression", "LDA", "Naive Bayes", "QDA")
+results <- tibble(accuracies = accuracies, models = models)
+results %>% 
+  arrange(-accuracies)
+```
+
+# Q10
+The accuracy for the logistic regression was 0.8188 versus .8044 for the logistic regression. These values are quite close, so it seems our model is doing a good job of not overfitting.
+
+Accuracy of testing data:
+```{r}
+# fit 
+bind_cols(predict(log_fit, new_data = titanic_test), titanic_test %>% dplyr::select(survived))
+
+# get accuracy
+bind_cols(predict(log_fit, new_data = titanic_test), titanic_test %>% dplyr::select(survived)) %>% accuracy(truth = survived, estimate = .pred_class)
+```
+
+Confusion matrix:
+```{r message = FALSE, warning = FALSE}
+predict(log_fit, titanic_test)
+
+# visual representation of confusion matrix
+augment(log_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+ROC plot:
+```{r message = FALSE, warning = FALSE}
+augment(nb_fit, new_data = titanic_test) %>%
+  roc_curve(survived, .pred_Yes) %>%
+  autoplot()
+```
+
+The AUC is 0.7781:
+```{r message = FALSE, warning = FALSE}
+augment(nb_fit, new_data = titanic_test) %>%
+  roc(survived, .pred_Yes)
+```
